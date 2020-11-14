@@ -126,7 +126,7 @@
   (bel-reduce bel-join (list a b ...)))
 
 (define-global bel-apply (f args ...)
-  (if (> (select "#" ...) 0)
+  (if (> (target lua: (select "#" ...) js: (# (list ...))) 0)
       (apply f (bel-cons args ...))
     (apply f args)))
 
@@ -331,6 +331,7 @@
   (let (v  (bel-uvar 'v)
         w  (bel-uvar 'w)
         ps (bel-parameters (bel-car parms)))
+    ; (print (list "TKTK" v w ps parms))
     `(fn ,v
        (bel-eif ,w (bel-apply (fn ,(bel-car parms) (list ,@ps))
                               (bel-car ,v))
@@ -342,7 +343,7 @@
   (if (bel-no p)           nil
       (bel-variable p)     (list p)
       (bel-atom p)         (bel-err 'bad-parm)
-      (bel-in (bel-car p) t o) (bel-parameters (bel-car (bel-cdr p)))
+      (bel-in (bel-car p) bel-t bel-o) (bel-parameters (bel-car (bel-cdr p)))
     (bel-append (bel-parameters (bel-car p))
                 (bel-parameters (bel-cdr p)))))
 
@@ -377,6 +378,29 @@
        (bel-cdr r)
        m))
 
+(bel-form dyn ((v e1 e2) a s r m)
+  (print (str `(dyn :v ,v :e1 ,e1 :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
+  (if (bel-variable v)
+      (bel-mev (bel-cons (list e1 a)
+                         (bel-fu (s r m) (bel-dyn2 v e2 a s r m))
+                         s)
+               r
+               m)
+      (bel-sigerr 'cannot-bind s r m)))
+
+(define-global bel-dyn2 (v e2 a s r m)
+  (print (str `(dyn2 :v ,v :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
+  (bel-mev (bel-cons (bel-list e2 a)
+                     (bel-list (bel-list bel-smark 'bind (bel-cons v (bel-car r)))
+                           nil)
+                     s)
+           (bel-cdr r)
+           m))
+
+; (define-global bel-dyn (var expr body)
+;   (print (cat "TKTK: " (str label) " " (str x)))
+;   x)
+
 (bel-form ccc ((f) a s r m)
   (bel-mev (bel-cons (list (list f (list 'lit 'cont s r))
                            a)
@@ -385,12 +409,21 @@
            m))
 
 (define-global bel-lookup (e a s g)
-  (or ;(bel-binding e s)
+  (or (bel-binding e s)
       (bel-get e a bel-id)
       (bel-get e g bel-id)
       (bel-case e
         scope (bel-cons e a)
         globe (bel-cons e g))))
+
+(define-global bel-caddr (x)
+  (bel-car (bel-cdr (bel-cdr x))))
+
+(define-global bel-binding (v s)
+  (bel-get v
+           (bel-map bel-caddr (bel-keep (fn (_) (bel-begins _ (list bel-smark 'bind) bel-id))
+                                        (bel-map bel-car s)))
+           bel-id))
 
 (define-global bel-evcall (e a s r m)
   (print (str `(bel-evcall :e ,e :a ,a :s ,s :r ,r :m ,m)))
@@ -457,9 +490,9 @@
   )))))))
 
 (define-global bel-bel (e (o g bel-globe))
-  (bel-ev (list (list e nil))
-          nil
-          (list nil g)))
+  (bel-ev (list (list e bel-nil))
+          bel-nil
+          (list bel-nil g)))
 
 ; (bel-lookup 'scope (bel-put 'foo 42) '((+ 1 2)) (bel-put 'car 'bel-car))
 ; (bel-lookup 'globe (bel-put 'foo 42) '((+ 1 2)) (bel-put 'car 'bel-car))
@@ -468,3 +501,4 @@
 ; not working: (bel-ev `(((,bel-smark bind foo 42)) ((join 1 2))) nil (list nil (bel-put 'join bel-join)))
 ; (bel-ev `(((,bel-smark bind foo 42)) ((join 1 2))) nil (list nil (bel-put 'join '(lit prim join))))
 ; (bel-bel '(id 1 1))
+; (bel-bel '(dyn x 42 (join x (quote (a b)))))
