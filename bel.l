@@ -342,12 +342,35 @@
                 (bel-parameters (bel-cdr p)))))
 
 (define-macro bel-form (name parms rest: body)
-  `(set bel-forms (bel-put ',name ,(bel-formfn parms body) forms)))
+  `(set bel-forms (bel-put ',name ,(bel-formfn parms body) bel-forms)))
 
 )
 
 (bel-form quote ((e) a s r m)
   (bel-mev s (bel-cons e r) m))
+
+(bel-form if (es a s r m)
+  (print (str `(bel-if :es ,es :a ,a :s ,s :r ,r :m ,m)))
+  (if (bel-no es)
+      (bel-mev s (bel-cons nil r) m)
+      (bel-mev (bel-cons (list (bel-car es) a)
+                         (if (bel-yes (bel-cdr es))
+                             (bel-cons (bel-fu (s r m)
+                                         (bel-if2 (bel-cdr es) a s r m))
+                                       s)
+                             s))
+               r
+               m)))
+
+(define-global bel-if2 (es a s r m)
+  (print (str `(bel-if2 :es ,es :a ,a :s ,s :r ,r :m ,m)))
+  (bel-mev (bel-cons (list (if (bel-car r)
+                               (bel-car es)
+                               (bel-cons 'if (bel-cdr es)))
+                           a)
+             s)
+       (bel-cdr r)
+       m))
 
 (define-global bel-lookup (e a s g)
   (or ;(bel-binding e s)
