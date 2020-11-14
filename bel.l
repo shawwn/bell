@@ -542,6 +542,18 @@
                r
                m)))
 
+(define-global bel-applym (mac args a s r m)
+  (bel-applyf (bel-caddr mac)
+              args
+              a
+              (bel-cons (bel-fu (s r m)
+                                (bel-mev (bel-cons (bel-list (bel-car r) a) s)
+                                         (bel-cdr r)
+                                         m))
+                        s)
+              r
+              m))
+
 (define-global bel-applyf (f args a s r m)
   (print (str `(bel-applyf :f ,f :args ,args :a ,a :s ,s :r ,r :m ,m)))
   (if (= f 'apply)   (bel-applyf (bel-car args) (bel-reduce bel-join (bel-cdr args)) a s r m)
@@ -560,6 +572,7 @@
              (if (and (bel-okenv env) (bel-okparms parms))
                  (bel-applyclo parms args env body s r m)
                  (bel-sigerr 'bad-clo s r m)))
+      mac  (bel-applym f (bel-map (fn (_) (bel-list 'quote _)) args) a s r m)
       cont (let (((o s2) (o r2) . extra) ret)
              ; TODO: okstack
              (bel-applycont s2 r2 args s r m))
