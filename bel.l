@@ -55,6 +55,17 @@
                        (get r 'rest)
                       r))))
 
+(define-global bel-xar (x y)
+  (set (at x 0) y)
+  y)
+
+(define-global bel-xdr (x y)
+  (wipe (get x 'rest))
+  (while (> (# x) 1)
+    (drop x))
+  (set (get x 'rest) y)
+  y)
+
 (define-global bel-uvar ((o name 'u))
   (unique (cat "bel-" name)))
 )
@@ -257,6 +268,8 @@
                   join (bel-join a b)
                   car (bel-car a)
                   cdr (bel-cdr a)
+                  xar (bel-xar a b)
+                  xdr (bel-xdr a b)
                   type (bel-type a)
                   prn (bel-prn b a)
                   bad)
@@ -293,14 +306,14 @@
 
 (define-global bel-vref (v a s r m)
   (let g (bel-car (bel-cdr m))
-    (if ; (inwhere s)
-        ; (aif (or (lookup v a s g)
-        ;          (and (car (inwhere s))
-        ;               (let cell (cons v nil)
-        ;                 (xdr g (cons cell (cdr g)))
-        ;                 cell)))
-        ;      (mev (cdr s) (cons (list it 'd) r) m)
-        ;      (sigerr 'unbound s r m))
+    (if (bel-inwhere s)
+        (bel-aif (or (bel-lookup v a s g)
+                     (and (bel-car (bel-inwhere s))
+                          (let cell (bel-cons v bel-nil)
+                            (bel-xdr g (bel-cons cell (bel-cdr g)))
+                            cell)))
+             (bel-mev (bel-cdr s) (bel-cons (bel-list it 'd) r) m)
+             (bel-sigerr 'unbound s r m))
         (bel-aif (bel-lookup v a s g)
                  (bel-mev s (bel-cons (bel-cdr it) r) m)
                  (bel-sigerr (list 'unboundb v) s r m)))))
@@ -310,7 +323,12 @@
 (during-compilation
   (define-macro bel-fu (...)
     (let args (list ...)
-      `(list (list bel-smark 'fut (fn ,@args)) nil))))
+      `(list (list bel-smark 'fut (fn ,@args)) nil)))
+
+  ; (define-macro bel-set (v (o e bel-t))
+  ;   `(bel-let (cell loc) (bel-where ,v bel-t)
+  ;      ((bel-case loc a bel-xar d bel-xdr) cell ,e)))
+  )
 
 (define-global bel-evmark (e a s r m)
   (print (str `(bel-evmark :e ,e :a ,a :s ,s :r ,r :m ,m)))
@@ -379,6 +397,13 @@
        (bel-cdr r)
        m))
 
+(bel-form where ((e (o new)) a s r m)
+  (bel-mev (bel-cons (bel-list e a)
+                     (bel-list (bel-list bel-smark 'loc new) bel-nil)
+                     s)
+           r
+           m))
+
 (bel-form dyn ((v e1 e2) a s r m)
   (print (str `(dyn :v ,v :e1 ,e1 :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
   (if (bel-variable v)
@@ -408,6 +433,11 @@
                      s)
            r
            m))
+
+(define-global bel-inwhere (s)
+  (let e (bel-car (bel-car s))
+    (and (bel-begins e (bel-list bel-smark 'loc))
+         (bel-cdr (bel-cdr e)))))
 
 (define-global bel-lookup (e a s g)
   (or (bel-binding e s)
@@ -485,10 +515,12 @@
   (bel-put 'id '(lit prim id)
   (bel-put 'car '(lit prim car)
   (bel-put 'cdr '(lit prim cdr)
+  (bel-put 'xar '(lit prim xar)
+  (bel-put 'xdr '(lit prim xdr)
   (bel-put 'join '(lit prim join)
   (bel-put 'type '(lit prim type)
   (bel-put 'prn '(lit prim prn)
-  )))))))
+  )))))))))
 
 (define-global bel-bel (e (o g bel-globe))
   (bel-ev (list (list e bel-nil))
