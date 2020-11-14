@@ -265,8 +265,8 @@
                  (bel-mev s (bel-cons v r) m)))))
 
 (define-global bel-locked? (s)
-  ;(cdr (binding 'lock s))
-  bel-nil)
+  (print (str `(bel-locked? ,(bel-yes (bel-cdr (bel-binding 'lock s))))))
+  (bel-yes (bel-cdr (bel-binding 'lock s))))
 
 (define-global bel-mev ((o s bel-nil) (o r bel-nil) (o (p g) ()))
   (print (str `(bel-mev ,s ,r ,p ,g)))
@@ -275,9 +275,9 @@
           (bel-sched p g)
           (bel-car r))
       (bel-sched (if (bel-locked? s)
-                 (bel-cons (bel-list s r) p)
-                 (bel-snoc p (bel-list s r)))
-             g)))
+                     (bel-cons (bel-list s r) p)
+                     (bel-snoc p (bel-list s r)))
+                 g)))
 
 (define-global bel-sched (((s r) . p) g)
   (bel-ev s r (bel-list p g)))
