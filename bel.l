@@ -450,7 +450,7 @@
 
 (define-global bel-applyf (f args a s r m)
   (print (str `(bel-applyf :f ,f :args ,args :a ,a :s ,s :r ,r :m ,m)))
-  (if (= f apply)    (bel-applyf (bel-car args) (bel-reduce bel-join (bel-cdr args)) a s r m)
+  (if (= f 'apply)   (bel-applyf (bel-car args) (bel-reduce bel-join (bel-cdr args)) a s r m)
       (bel-caris f 'lit) (if (bel-proper f)
                              (bel-applylit f args a s r m)
                              (bel-sigerr 'bad-lit s r m))
