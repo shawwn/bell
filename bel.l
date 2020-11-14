@@ -2,26 +2,28 @@
 ; (define-global car (x) (if (nil? x) x (hd x)))
 ; (define-global cdr (x) (if (nil? x) x (tl x)))
 
+
 (during-compilation
 
 (define-global bel-t 't)
+(define-global bel-o 'o)
 (define-global bel-nil 'nil)
 
 (define-global bel-err (kind)
   (print (str `(bel-err ,(if (obj? kind) (get kind 'message) kind))))
   (if (obj? kind) (throw kind) (error kind)))
 
-(define-global bel--false? (x)
+(define-global bel-false? (x)
   (= x false))
 
-(define-global bel--nil? (x)
+(define-global bel-nil? (x)
   (or (nil? x)
       (= x bel-nil)
       (and (obj? x) (none? x))))
 
 (define-global bel-no (x)
-  (or (bel--false? x)
-      (bel--nil? x)))
+  (or (bel-false? x)
+      (bel-nil? x)))
 
 (define-global bel-yes (x)
   (not (bel-no x)))
@@ -30,16 +32,8 @@
   (or (= a b)
       (and (bel-no a) (bel-no b))))
 
-(define-global bel-type (x)
-  (if (bel--nil? x) 'sym
-      (obj? x) 'pair
-      (string-literal? x) 'str
-      (number? x) 'num
-      (string? x) 'sym
-    (error "bel-type: unknown")))
-
 (define-global bel-join (a b)
-  (if (bel--nil? b) (if (bel--nil? a) (list) (list a))
+  (if (bel-nil? b) (if (bel-nil? a) (list) (list a))
       (obj? b) `(,a ,@b)
     `(,a rest: ,b)))
 
@@ -52,39 +46,6 @@
                             (none? r))
                        (get r 'rest)
                       r))))
-
-(define-global bel-atom (x)
-  (bel-no (bel-id (bel-type x) 'pair)))
-
-
-(define-global bel-reduce (f xs)
-  (if (bel-no (bel-cdr xs))
-      (bel-car xs)
-      (f (bel-car xs) (bel-reduce f (bel-cdr xs)))))
-
-(define-global bel-cons ((o a bel-nil) (o b bel-nil) ...)
-  (bel-reduce bel-join (list a b ...)))
-
-(define-global bel-apply (f args ...)
-  (if (> (select "#" ...) 0)
-      (apply f (bel-cons args ...))
-    (apply f args)))
-
-(define-global bel-append (...)
-  (let args (list ...)
-    (if (bel-no (bel-cdr args)) (bel-car args)
-        (bel-no (bel-car args)) (bel-apply bel-append (bel-cdr args))
-      (bel-cons (bel-car (bel-car args))
-                (bel-apply bel-append
-                           (bel-cdr (bel-car args))
-                           (bel-cdr args))))))
-
-(define-global bel-snoc (...)
-  (let args (list ...)
-    (bel-append (bel-car args) (bel-cdr args))))
-
-(define-global bel-list (...)
-  (bel-append (list ...) bel-nil))
 
 (define-global bel-uvar ((o name 'u))
   (unique (cat "bel-" name)))
@@ -118,8 +79,147 @@
 
   (define-macro bel-aif (...)
     `(bel-iflet it ,@(list ...)))
+)
+
+
+(during-compilation
+
+(define-global bel-atom (x)
+  (bel-no (bel-id (bel-type x) 'pair)))
+
+(define-global bel-all (f xs)
+  (if (bel-no xs)      bel-t
+      (f (bel-car xs)) (bel-all f (bel-cdr xs))
+      nil))
+
+(define-global bel-some (f xs)
+  (if (bel-no xs)      nil
+      (f (bel-car xs)) xs
+    (bel-some f (bel-cdr xs))))
+
+(define-global bel-type (x)
+  (if (bel-nil? x) 'symbol
+      (obj? x) 'pair
+      (string-literal? x) 'char
+      (number? x) 'number
+      (string? x) 'symbol
+      (function? x) 'function
+    (error (cat "bel-type: unknown " (str x)))))
+
+(define-global bel-reduce (f xs)
+  (if (bel-no (bel-cdr xs))
+      (bel-car xs)
+      (f (bel-car xs) (bel-reduce f (bel-cdr xs)))))
+
+(define-global bel-cons ((o a bel-nil) (o b bel-nil) ...)
+  (bel-reduce bel-join (list a b ...)))
+
+(define-global bel-apply (f args ...)
+  (if (> (select "#" ...) 0)
+      (apply f (bel-cons args ...))
+    (apply f args)))
+
+(define-global bel-append (...)
+  (let args (list ...)
+    (if (bel-no (bel-cdr args)) (bel-car args)
+        (bel-no (bel-car args)) (bel-apply bel-append (bel-cdr args))
+      (bel-cons (bel-car (bel-car args))
+                (bel-apply bel-append
+                           (bel-cdr (bel-car args))
+                           (bel-cdr args))))))
+
+(define-global bel-snoc (...)
+  (let args (list ...)
+    (bel-append (bel-car args) (bel-cdr args))))
+
+(define-global bel-list (...)
+  (bel-append (list ...) bel-nil))
+
+(define-global bel-map (f ...)
+  (let ls (list ...)
+    (if (bel-no ls)          nil
+        (bel-some bel-no ls) nil
+        (bel-no (bel-cdr ls)) (bel-cons (f (bel-car (bel-car ls)))
+                                        (bel-map f (bel-cdr (bel-car ls))))
+      (bel-cons (bel-apply f (bel-map bel-car ls))
+                (bel-apply bel-map f (bel-map bel-cdr ls))))))
+
+(define-global bel-= (...)
+  (let args (list ...)
+    (if (bel-no (bel-cdr args))  bel-t
+        (bel-some bel-atom args) (bel-all (fn (_) (bel-id _ (bel-car args))) (bel-cdr args))
+      (and (bel-apply bel-= (bel-map bel-car args))
+           (bel-apply bel-= (bel-map bel-cdr args))))))
+
+(define-global bel-find (f xs)
+  (bel-aif (bel-some f xs) (bel-car it)))
+
+(define-global bel-begins (xs pat (o f bel-=))
+  (if (bel-no pat)                   bel-t
+      (bel-atom xs)                  nil
+      (f (bel-car xs) (bel-car pat)) (bel-begins (bel-cdr xs) (bel-cdr pat) f)
+                                     nil))
+
+(define-global bel-caris (x y (o f bel-=))
+  (bel-begins x (bel-list y) f))
+
+(define-global bel-symbol (x) (bel-= (bel-type x) 'symbol))
+
+(define-global bel-pair   (x) (bel-= (bel-type x) 'pair))
+
+(define-global bel-char   (x) (bel-= (bel-type x) 'char))
+
+(define-global bel-stream (x) (bel-= (bel-type x) 'stream))
+
+(define-global bel-proper (x)
+  (or (bel-no x)
+      (and (bel-pair x) (bel-proper (bel-cdr x)))))
+
+(define-global bel-string (x)
+  (and (bel-proper x) (bel-all bel-char x)))
+
+(define-global bel-mem (x ys (o f bel-=))
+  (bel-some (fn (_) (f _ x)) ys))
+
+(define-global bel-in (x ...)
+  (bel-mem x (list ...)))
+
+(define-global bel-literal (e)
+  (or ;(in e t nil o apply)
+      (bel-in e bel-t bel-nil bel-o 'apply apply bel-apply)
+      (bel-in (bel-type e) 'char 'stream 'number) ; notice we check number here, departing from bel
+      (bel-caris e 'lit)
+      (bel-string e)))
+
+(define-global bel-vmark (bel-join 'vmark))
+
+(define-global bel-variable (e)
+  (if (bel-atom e)
+      (bel-no (bel-literal e))
+      (bel-id (bel-car e) bel-vmark)))
+
+(define-global bel-isa (name)
+  (fn (_) (bel-begins _ `(lit ,name) bel-id)))
+)
+
+(during-compilation
+
+(define-global bel-keep (f xs)
+  (if (bel-no xs)      nil
+      (f (bel-car xs)) (bel-cons (bel-car xs) (bel-keep f (bel-cdr xs)))
+    (bel-keep f (bel-cdr xs))))
+
+(define-global bel-rem (x ys (o f bel-=))
+  (bel-keep (fn (_) (bel-no (f _ x))) ys))
+
+(define-global bel-get (k kvs (o f bel-=))
+  (bel-find (fn (_) (f (bel-car _) k)) kvs))
+
+(define-global bel-put (k v kvs (o f bel-=))
+  (bel-cons (bel-cons k v)
+            (bel-rem k kvs (fn (x y) (f (bel-car x) y)))))
   
-  )
+)
 
 (define-global bel-sigerr ((o msg 'no-err) s r m)
   (bel-err msg))
@@ -144,7 +244,7 @@
   ;(cdr (binding 'lock s))
   bel-nil)
 
-(define-global bel-mev ((o s 'nil) (o r 'nil) (o (p g) ()))
+(define-global bel-mev ((o s bel-nil) (o r bel-nil) (o (p g) ()))
   (print (str `(bel-mev ,s ,r ,p ,g)))
   (if (bel-no s)
       (if (bel-yes p)
@@ -159,7 +259,20 @@
   (bel-ev s r (bel-list p g)))
 
 (define-global bel-ev (((e a) . s) r m)
-  (print (str `(bel-ev :e ,e :a ,a :s ,s :r ,r :m ,m))))
+  (print (str `(bel-ev :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  (bel-aif (bel-literal e)            (bel-mev s (bel-cons e r) m)
+           (bel-variable e)           (bel-vref e a s r m)
+           (bel-no (bel-proper e))            (bel-sigerr 'malformed s r m)
+           (bel-get (bel-car e) forms bel-id) ((bel-cdr it) (bel-cdr e) a s r m)
+    (bel-evcall e a s r m)))
+
+(define-global bel-lookup (e a s g)
+  (or ;(bel-binding e s)
+      (bel-get e a bel-id)
+      (bel-get e g bel-id)
+      (bel-case e
+        scope (bel-cons e a)
+        globe (bel-cons e g))))
 
 (define-global bel-applylit (f args a s r m)
   (let ((tag . rest) (bel-cdr f))
