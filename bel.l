@@ -35,6 +35,10 @@
   (or (= a b)
       (and (bel-no a) (bel-no b))))
 
+(define-global bel-prn (label x)
+  (print (cat "TKTK: " (str label) " " (str x)))
+  x)
+
 (define-global bel-join (a b)
   (if (bel-nil? b) (if (bel-nil? a) (list) (list a))
       (obj? b) `(,a ,@b)
@@ -253,6 +257,7 @@
                   car (bel-car a)
                   cdr (bel-cdr a)
                   type (bel-type a)
+                  prn (bel-prn b a)
                   bad)
              (bel-sigerr v s r m)
              (if (bel-id v bad)
@@ -425,7 +430,8 @@
   (bel-put 'cdr '(lit prim cdr)
   (bel-put 'join '(lit prim join)
   (bel-put 'type '(lit prim type)
-  ))))))
+  (bel-put 'prn '(lit prim prn)
+  )))))))
 
 (define-global bel-bel (e (o g bel-globe))
   (bel-ev (list (list e nil))
