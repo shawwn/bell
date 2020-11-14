@@ -10,8 +10,11 @@
 (define-global bel-nil 'nil)
 
 (define-global bel-err (kind)
-  (print (str `(bel-err ,(if (obj? kind) (get kind 'message) kind))))
-  (if (obj? kind) (throw kind) (error kind)))
+  ;(print (str `(bel-err ,(if (obj? kind) (get kind 'message) kind))))
+  (print (str `(bel-err ,kind)))
+  ;(if (obj? kind) (throw kind) (error kind))
+  ;(error kind)
+  )
 
 (define-global bel-false? (x)
   (= x false))
@@ -52,6 +55,10 @@
 )
 
 (during-compilation
+  (define-macro bel-let (lh rh ...)
+    `(let (,lh ,rh)
+       ,@(list ...)))
+
   (define-macro bel-eif (v expr fail then)
     (let-unique (ok)
       `(let ((,ok ,v) (guard ,expr))
@@ -218,10 +225,22 @@
 (define-global bel-put (k v kvs (o f bel-=))
   (bel-cons (bel-cons k v)
             (bel-rem k kvs (fn (x y) (f (bel-car x) y)))))
+
+(define-global bel-rev (xs)
+  (if (bel-no xs)
+      nil
+      (bel-snoc (bel-rev (bel-cdr xs)) (bel-car xs))))
+
+(define-global bel-snap (xs ys (o acc))
+  (if (bel-no xs)
+      (list acc ys)
+      (bel-snap (bel-cdr xs) (bel-cdr ys) (bel-snoc acc (bel-car ys)))))
+
   
 )
 
 (define-global bel-sigerr ((o msg 'no-err) s r m)
+  (print (str `(bel-sigerr :msg ,msg :s ,s :r ,r :m ,m)))
   (bel-err msg))
 
 (define-global bel-applyprim (f args s r m)
@@ -262,9 +281,45 @@
   (print (str `(bel-ev :e ,e :a ,a :s ,s :r ,r :m ,m)))
   (bel-aif (bel-literal e)            (bel-mev s (bel-cons e r) m)
            (bel-variable e)           (bel-vref e a s r m)
-           (bel-no (bel-proper e))            (bel-sigerr 'malformed s r m)
-           (bel-get (bel-car e) forms bel-id) ((bel-cdr it) (bel-cdr e) a s r m)
+           (bel-no (bel-proper e))    (bel-sigerr 'malformed s r m)
+           (bel-get (bel-car e) bel-forms bel-id) ((bel-cdr it) (bel-cdr e) a s r m)
     (bel-evcall e a s r m)))
+
+(define-global bel-vref (v a s r m)
+  (let g (bel-car (bel-cdr m))
+    (if ; (inwhere s)
+        ; (aif (or (lookup v a s g)
+        ;          (and (car (inwhere s))
+        ;               (let cell (cons v nil)
+        ;                 (xdr g (cons cell (cdr g)))
+        ;                 cell)))
+        ;      (mev (cdr s) (cons (list it 'd) r) m)
+        ;      (sigerr 'unbound s r m))
+        (bel-aif (bel-lookup v a s g)
+                 (bel-mev s (bel-cons (bel-cdr it) r) m)
+                 (bel-sigerr (list 'unboundb v) s r m)))))
+
+(define-global bel-smark (bel-join 'smark))
+
+(during-compilation
+  (define-macro bel-fu (...)
+    (let args (list ...)
+      `(list (list bel-smark 'fut (fn ,@args)) nil))))
+
+(define-global bel-evmark (e a s r m)
+  (print (str `(bel-evmark :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  (bel-case (bel-car e)
+    fut  ((bel-car (bel-cdr e)) s r m)
+    bind (bel-mev s r m)
+    loc  (bel-sigerr 'unfindable s r m)
+    prot (bel-mev (bel-cons (bel-list (bel-car (bel cdr e)) a)
+                            (bel-fu (s r m) (bel-mev s (bel-cdr r) m))
+                            s)
+                  r
+                  m)
+    (bel-sigerr 'unknown-mark s r m)))
+
+(define-global bel-forms (bel-list (bel-cons bel-smark bel-evmark)))
 
 (define-global bel-lookup (e a s g)
   (or ;(bel-binding e s)
@@ -274,8 +329,61 @@
         scope (bel-cons e a)
         globe (bel-cons e g))))
 
+(define-global bel-evcall (e a s r m)
+  (print (str `(bel-evcall :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  (bel-mev (bel-cons (list (bel-car e) a)
+                     (bel-fu (s r m)
+                       (bel-evcall2 (bel-cdr e) a s r m))
+                     s)
+           r
+           m))
+
+(define-global bel-evcall2 (es a s (op . r) m)
+  (print (str `(bel-evcall2 :es ,es :a ,a :s ,s :op ,op :r ,r :m ,m)))
+  (if ((bel-isa 'mac) op)
+      (bel-applym op es a s r m)
+      (bel-mev (bel-append (bel-map (fn (_) (list _ a)) es)
+                           (bel-cons (bel-fu (s r m)
+                                       (print (str `(bel-evcall2-fu :es ,es :s ,s :r ,r :m ,m)))
+                                       (let ((args r2) (bel-snap es r))
+                                         (print (str `(bel-evcall2-fu2 :args ,args :r2 ,r2 :es ,es :s ,s :r ,r :m ,m)))
+                                         (bel-applyf op (bel-rev args) a s r2 m)))
+                                     s))
+               r
+               m)))
+
+(define-global bel-applyf (f args a s r m)
+  (print (str `(bel-applyf :f ,f :args ,args :a ,a :s ,s :r ,r :m ,m)))
+  (if (= f apply)    (bel-applyf (bel-car args) (bel-reduce bel-join (bel-cdr args)) a s r m)
+      (bel-caris f 'lit) (if (bel-proper f)
+                             (bel-applylit f args a s r m)
+                             (bel-sigerr 'bad-lit s r m))
+      ; TKTK: call compiled functions directly?
+      ; (function? f) xxx
+    (bel-sigerr 'cannot-apply s r m)))
+
 (define-global bel-applylit (f args a s r m)
   (let ((tag . rest) (bel-cdr f))
     (bel-case tag
       prim (bel-applyprim (bel-car rest) args s r m)
       (bel-sigerr 'unapplyable s r m))))
+
+(define-global bel-globe
+  (bel-put 'id '(lit prim id)
+  (bel-put 'car '(lit prim car)
+  (bel-put 'cdr '(lit prim cdr)
+  (bel-put 'join '(lit prim join)
+  (bel-put 'type '(lit prim type)
+  ))))))
+
+(define-global bel-bel (e (o g bel-globe))
+  (bel-ev (list (list e nil))
+          nil
+          (list nil g)))
+
+; (bel-lookup 'scope (bel-put 'foo 42) '((+ 1 2)) (bel-put 'car 'bel-car))
+; (bel-lookup 'globe (bel-put 'foo 42) '((+ 1 2)) (bel-put 'car 'bel-car))
+; (bel-ev '(("a")))
+; (bel-ev '((42)))
+; not working: (bel-ev `(((,bel-smark bind foo 42)) ((join 1 2))) nil (list nil (bel-put 'join bel-join)))
+; (bel-ev `(((,bel-smark bind foo 42)) ((join 1 2))) nil (list nil (bel-put 'join '(lit prim join))))
