@@ -321,6 +321,34 @@
 
 (define-global bel-forms (bel-list (bel-cons bel-smark bel-evmark)))
 
+(during-compilation
+(define-global bel-formfn (parms body)
+  (let (v  (bel-uvar 'v)
+        w  (bel-uvar 'w)
+        ps (bel-parameters (bel-car parms)))
+    `(fn ,v
+       (bel-eif ,w (bel-apply (fn ,(bel-car parms) (list ,@ps))
+                              (bel-car ,v))
+                (bel-apply bel-sigerr 'bad-form (bel-cdr (bel-cdr ,v)))
+                (let (,ps ,w)
+                  (let (,(bel-cdr parms) (bel-cdr ,v)) ,@body))))))
+
+(define-global bel-parameters (p)
+  (if (bel-no p)           nil
+      (bel-variable p)     (list p)
+      (bel-atom p)         (bel-err 'bad-parm)
+      (bel-in (bel-car p) t o) (bel-parameters (bel-car (bel-cdr p)))
+    (bel-append (bel-parameters (bel-car p))
+                (bel-parameters (bel-cdr p)))))
+
+(define-macro bel-form (name parms rest: body)
+  `(set bel-forms (bel-put ',name ,(bel-formfn parms body) forms)))
+
+)
+
+(bel-form quote ((e) a s r m)
+  (bel-mev s (bel-cons e r) m))
+
 (define-global bel-lookup (e a s g)
   (or ;(bel-binding e s)
       (bel-get e a bel-id)
@@ -387,3 +415,4 @@
 ; (bel-ev '((42)))
 ; not working: (bel-ev `(((,bel-smark bind foo 42)) ((join 1 2))) nil (list nil (bel-put 'join bel-join)))
 ; (bel-ev `(((,bel-smark bind foo 42)) ((join 1 2))) nil (list nil (bel-put 'join '(lit prim join))))
+; (bel-bel '(id 1 1))
