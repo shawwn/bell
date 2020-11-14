@@ -24,6 +24,9 @@
       (= x bel-nil)
       (and (obj? x) (none? x))))
 
+(define-global bel-is? (x)
+  (not (bel-nil? x)))
+
 (define-global bel-no (x)
   (or (bel-false? x)
       (bel-nil? x)))
@@ -278,6 +281,49 @@
                  (bel-sigerr 'unknown-prim s r m)
                  (bel-mev s (bel-cons v r) m)))))
 
+(define-global bel-applyclo (parms args env body s r m)
+  (bel-mev (bel-cons (bel-fu (s r m)
+                             (bel-pass parms args env s r m))
+                     (bel-fu (s r m)
+                             (bel-mev (bel-cons (bel-list body (bel-car r)) s)
+                                      (bel-cdr r)
+                                      m))
+                     s)
+           r
+           m))
+
+
+(define-global bel-pass (pat arg env s r m)
+  (let ret (fn (_) (bel-mev s (bel-cons _ r) m))
+    (if (bel-no pat)       (if (bel-is? arg)
+                               (bel-sigerr 'overargs s r m)
+                               (ret env))
+        (bel-literal pat)  (bel-sigerr 'literal-parm s r m)
+        (bel-variable pat) (ret (bel-cons (bel-cons pat arg) env))
+        (bel-caris pat bel-t)  (bel-typecheck (bel-cdr pat) arg env s r m)
+        (bel-caris pat bel-o)  (bel-pass (bel-cadr pat) arg env s r m)
+      (bel-destructure pat arg env s r m))))
+
+(define-global bel-destructure ((p . ps) arg env s r m)
+  (if (bel-no arg)   (if (bel-caris p bel-o)
+                         (mev (bel-cons (bel-list (bel-caddr p) env)
+                                        (bel-fu (s r m)
+                                                (bel-pass (bel-cadr p) (bel-car r) env s (bel-cdr r) m))
+                                        (bel-fu (s r m)
+                                                (bel-pass ps bel-nil (bel-car r) s (bel-cdr r) m))
+                                        s)
+                              r
+                              m)
+                         (bel-sigerr 'underargs s r m))
+      (bel-atom arg) (bel-sigerr 'atom-arg s r m)
+    (bel-mev (bel-cons (bel-fu (s r m)
+                               (bel-pass p (bel-car arg) env s r m))
+                       (bel-fu (s r m)
+                               (bel-pass ps (bel-cdr arg) (bel-car r) s (bel-cdr r) m))
+                       s)
+             r
+             m)))
+
 (define-global bel-locked? (s)
   (print (str `(bel-locked? ,(bel-yes (bel-cdr (bel-binding 'lock s))))))
   (bel-yes (bel-cdr (bel-binding 'lock s))))
@@ -404,6 +450,23 @@
            r
            m))
 
+(bel-form set ((v (o e bel-t)) a s r m)
+  (print (str `(set :v ,v :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  (if (bel-variable v)
+      (bel-mev (bel-cons (list `(where ,v t))
+                         (list e a)
+                         (bel-fu (s (y p . r) m) (bel-set2 p y a s r m))
+                         s)
+               r
+               m)
+      (bel-sigerr 'cannot-set s r m)))
+
+(define-global bel-set2 (p e a s r m)
+  (print (str `(set2 :p ,p :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  (bel-let (cell loc) p
+    ((bel-case loc a bel-xar d bel-xdr) cell e)
+    (bel-mev s (bel-cons e r) m)))
+
 (bel-form dyn ((v e1 e2) a s r m)
   (print (str `(dyn :v ,v :e1 ,e1 :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
   (if (bel-variable v)
@@ -418,7 +481,7 @@
   (print (str `(dyn2 :v ,v :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
   (bel-mev (bel-cons (bel-list e2 a)
                      (bel-list (bel-list bel-smark 'bind (bel-cons v (bel-car r)))
-                           nil)
+                               bel-nil)
                      s)
            (bel-cdr r)
            m))
@@ -493,10 +556,36 @@
   (let ((tag . rest) (bel-cdr f))
     (bel-case tag
       prim (bel-applyprim (bel-car rest) args s r m)
+      clo  (bel-let ((o env) (o parms) (o body) . extra) rest
+             (if (and (bel-okenv env) (bel-okparms parms))
+                 (bel-applyclo parms args env body s r m)
+                 (bel-sigerr 'bad-clo s r m)))
       cont (let (((o s2) (o r2) . extra) ret)
              ; TODO: okstack
              (bel-applycont s2 r2 args s r m))
       (bel-sigerr 'unapplyable s r m))))
+
+(define-global bel-okenv (a)
+  (and (bel-proper a) (bel-all bel-pair a)))
+
+(define-global bel-okstack (s)
+  (and (bel-proper s)
+       (bel-all (fn (_) (and (bel-proper _) (bel-cdr _) (bel-okenv (bel-car (bel-cdr _)))))
+                s)))
+
+(define-global bel-okparms (p)
+  (if (bel-no p)       bel-t
+      (bel-variable p) bel-t
+      (bel-atom p)     bel-nil
+      (bel-caris p bel-t)  (bel-oktoparm p)
+    (and (if (bel-caris (bel-car p) bel-o)
+             (bel-oktoparm (bel-car p))
+             (bel-okparms (bel-car p)))
+         (bel-okparms (bel-cdr p)))))
+
+(define-global bel-oktoparm ((tag (o var) (o e) . extra))
+  (and (bel-okparms var) (or (bel-= tag o) e) (bel-no extra)))
+
 
 (define-global bel-applycont (s2 r2 args s r m)
   (if (or (bel-no args) (bel-cdr args))
