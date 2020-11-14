@@ -377,6 +377,13 @@
        (bel-cdr r)
        m))
 
+(bel-form ccc ((f) a s r m)
+  (bel-mev (bel-cons (list (list f (list 'lit 'cont s r))
+                           a)
+                     s)
+           r
+           m))
+
 (define-global bel-lookup (e a s g)
   (or ;(bel-binding e s)
       (bel-get e a bel-id)
@@ -422,7 +429,23 @@
   (let ((tag . rest) (bel-cdr f))
     (bel-case tag
       prim (bel-applyprim (bel-car rest) args s r m)
+      cont (let (((o s2) (o r2) . extra) ret)
+             ; TODO: okstack
+             (bel-applycont s2 r2 args s r m))
       (bel-sigerr 'unapplyable s r m))))
+
+(define-global bel-applycont (s2 r2 args s r m)
+  (if (or (bel-no args) (bel-cdr args))
+      (bel-sigerr 'wrong-no-args s r m)
+      (bel-mev (bel-append (bel-keep (fn (_) (and (bel-protected _) (bel-no (bel-mem _ s2 id))))
+                                     s)
+                           s2)
+               (bel-cons (bel-car args) r2)
+               m)))
+
+(define-global bel-protected (x)
+  (bel-some (fn (_) (bel-begins (bel-car x) (list bel-smark _) id))
+            '(bind prot)))
 
 (define-global bel-globe
   (bel-put 'id '(lit prim id)
