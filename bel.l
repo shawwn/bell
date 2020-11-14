@@ -32,8 +32,9 @@
   (not (bel-no x)))
 
 (define-global bel-id (a b)
-  (or (= a b)
-      (and (bel-no a) (bel-no b))))
+  (when (or (= a b)
+            (and (bel-no a) (bel-no b)))
+    bel-t))
 
 (define-global bel-prn (label x)
   (print (cat "TKTK: " (str label) " " (str x)))
