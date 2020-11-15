@@ -19,6 +19,9 @@
 (define-global bel-false? (x)
   (= x false))
 
+(define-global bel-true? (x)
+  (= x true))
+
 (define-global bel-nil? (x)
   (or (nil? x)
       (= x bel-nil)
@@ -35,9 +38,12 @@
   (not (bel-no x)))
 
 (define-global bel-id (a b)
-  (when (or (= a b)
-            (and (bel-no a) (bel-no b)))
-    bel-t))
+  (if ;(bel-true? a) (bel-id bel-t b)
+      ;(bel-true? b) (bel-id a bel-t)
+      (or (= a b)
+          (and (bel-no a)
+               (bel-no b)))
+      bel-t))
 
 (define-global bel-prn (label x)
   (print (cat "TKTK: " (str label) " " (str x)))
@@ -49,14 +55,17 @@
     `(,a rest: ,b)))
 
 (define-global bel-car (x)
-  (if (nil? x) x (hd x)))
+  (if (nil? x) x (obj? x) (hd x)
+    (error (cat "Can't take car of " (str x)))))
 
 (define-global bel-cdr (x)
-  (if (nil? x) x (let r (tl x)
+  (if (nil? x) x
+      (obj? x) (let r (tl x)
                    (if (and (has? r 'rest)
                             (none? r))
                        (get r 'rest)
-                      r))))
+                      r))
+    (error (cat "Can't take cdr of " (str x)))))
 
 (define-global bel-xar (x y)
   (set (at x 0) y)
@@ -68,6 +77,9 @@
     (drop x))
   (set (get x 'rest) y)
   y)
+
+(define-global bel-sum (numbers)
+  (apply + numbers))
 
 (define-global bel-uvar ((o name 'u))
   (unique (cat "bel-" name)))
@@ -130,6 +142,7 @@
       (number? x) 'number
       (string? x) 'symbol
       (function? x) 'function
+      (boolean? x) 'sym
     (error (cat "bel-type: unknown " (str x)))))
 
 (define-global bel-reduce (f xs)
@@ -212,7 +225,7 @@
 
 (define-global bel-literal (e)
   (or ;(in e t nil o apply)
-      (bel-in e bel-t bel-nil bel-o 'apply apply bel-apply)
+      (bel-in e bel-t bel-nil bel-o 'apply apply bel-apply true false)
       (bel-in (bel-type e) 'char 'stream 'number) ; notice we check number here, departing from bel
       (bel-caris e 'lit)
       (bel-string e)))
@@ -259,7 +272,7 @@
 )
 
 (define-global bel-sigerr ((o msg 'no-err) s r m)
-  (print (str `(bel-sigerr :msg ,msg :s ,s :r ,r :m ,m)))
+  (print (str `(bel-sigerr :msg ,msg :s ,s :r ,r)))
   (bel-err msg))
 
 (define-global bel-applyprim (f args s r m)
@@ -275,6 +288,8 @@
                   xdr (bel-xdr a b)
                   type (bel-type a)
                   prn (bel-prn b a)
+                  sum (bel-sum a)
+                  cons (bel-cons a b)
                   bad)
              (bel-sigerr v s r m)
              (if (bel-id v bad)
@@ -294,9 +309,10 @@
 
 
 (define-global bel-pass (pat arg env s r m)
+  ; (print (str `(bel-pass :pat ,pat :arg ,arg :env ,env :s ,s :r ,r :m ,m)))
   (let ret (fn (_) (bel-mev s (bel-cons _ r) m))
     (if (bel-no pat)       (if (bel-is? arg)
-                               (bel-sigerr 'overargs s r m)
+                               (bel-sigerr 'overargs (list pat arg s) r m)
                                (ret env))
         (bel-literal pat)  (bel-sigerr 'literal-parm s r m)
         (bel-variable pat) (ret (bel-cons (bel-cons pat arg) env))
@@ -304,32 +320,35 @@
         (bel-caris pat bel-o)  (bel-pass (bel-cadr pat) arg env s r m)
       (bel-destructure pat arg env s r m))))
 
-(define-global bel-destructure ((p . ps) arg env s r m)
-  (if (bel-no arg)   (if (bel-caris p bel-o)
-                         (mev (bel-cons (bel-list (bel-caddr p) env)
-                                        (bel-fu (s r m)
-                                                (bel-pass (bel-cadr p) (bel-car r) env s (bel-cdr r) m))
-                                        (bel-fu (s r m)
-                                                (bel-pass ps bel-nil (bel-car r) s (bel-cdr r) m))
-                                        s)
-                              r
-                              m)
-                         (bel-sigerr 'underargs s r m))
-      (bel-atom arg) (bel-sigerr 'atom-arg s r m)
-    (bel-mev (bel-cons (bel-fu (s r m)
-                               (bel-pass p (bel-car arg) env s r m))
-                       (bel-fu (s r m)
-                               (bel-pass ps (bel-cdr arg) (bel-car r) s (bel-cdr r) m))
-                       s)
-             r
-             m)))
+(define-global bel-destructure (x arg env s r m)
+  (let (p (bel-car x)
+        ps (bel-cdr x))
+    ; (print (str `(bel-destructure :p ,p :ps ,ps :arg ,arg :env ,env)))
+    (if (bel-no arg)   (if (bel-caris p bel-o)
+                           (bel-mev (bel-cons (bel-list (bel-caddr p) env)
+                                              (bel-fu (s r m)
+                                                      (bel-pass (bel-cadr p) (bel-car r) env s (bel-cdr r) m))
+                                              (bel-fu (s r m)
+                                                      (bel-pass ps bel-nil (bel-car r) s (bel-cdr r) m))
+                                              s)
+                                    r
+                                    m)
+                           (bel-sigerr 'underargs s r m))
+        (bel-atom arg) (bel-sigerr 'atom-arg s r m)
+        (bel-mev (bel-cons (bel-fu (s r m)
+                                   (bel-pass p (bel-car arg) env s r m))
+                           (bel-fu (s r m)
+                                   (bel-pass ps (bel-cdr arg) (bel-car r) s (bel-cdr r) m))
+                           s)
+                 r
+                 m))))
 
 (define-global bel-locked? (s)
-  (print (str `(bel-locked? ,(bel-yes (bel-cdr (bel-binding 'lock s))))))
+  ; (print (str `(bel-locked? ,(bel-yes (bel-cdr (bel-binding 'lock s))))))
   (bel-yes (bel-cdr (bel-binding 'lock s))))
 
 (define-global bel-mev ((o s bel-nil) (o r bel-nil) (o (p g) ()))
-  (print (str `(bel-mev ,s ,r ,p ,g)))
+  ; (print (str `(bel-mev ,s ,r ,p ,g)))
   (if (bel-no s)
       (if (bel-yes p)
           (bel-sched p g)
@@ -343,7 +362,13 @@
   (bel-ev s r (bel-list p g)))
 
 (define-global bel-ev (((e a) . s) r m)
-  (print (str `(bel-ev :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  ; (print "----")
+  ; ; (print (str `(bel-ev :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(bel-ev :e ,e)))
+  ; (print (str `(bel-ev :a ,a)))
+  ; (print (str `(bel-ev :s ,s)))
+  ; (print (str `(bel-ev :r ,r)))
+  ; ;(print (str `(bel-ev :m ,m)))
   (bel-aif (bel-literal e)            (bel-mev s (bel-cons e r) m)
            (bel-variable e)           (bel-vref e a s r m)
            (bel-no (bel-proper e))    (bel-sigerr 'malformed s r m)
@@ -377,7 +402,7 @@
   )
 
 (define-global bel-evmark (e a s r m)
-  (print (str `(bel-evmark :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(bel-evmark :e ,e :a ,a :s ,s :r ,r :m ,m)))
   (bel-case (bel-car e)
     fut  ((bel-car (bel-cdr e)) s r m)
     bind (bel-mev s r m)
@@ -421,7 +446,7 @@
   (bel-mev s (bel-cons e r) m))
 
 (bel-form if (es a s r m)
-  (print (str `(bel-if :es ,es :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(bel-if :es ,es :a ,a :s ,s :r ,r :m ,m)))
   (if (bel-no es)
       (bel-mev s (bel-cons nil r) m)
       (bel-mev (bel-cons (list (bel-car es) a)
@@ -434,7 +459,7 @@
                m)))
 
 (define-global bel-if2 (es a s r m)
-  (print (str `(bel-if2 :es ,es :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(bel-if2 :es ,es :a ,a :s ,s :r ,r :m ,m)))
   (bel-mev (bel-cons (list (if (bel-car r)
                                (bel-car es)
                                (bel-cons 'if (bel-cdr es)))
@@ -451,7 +476,7 @@
            m))
 
 (bel-form set ((v (o e bel-t)) a s r m)
-  (print (str `(set :v ,v :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(set :v ,v :e ,e :a ,a :s ,s :r ,r :m ,m)))
   (if (bel-variable v)
       (bel-mev (bel-cons (list `(where ,v t))
                          (list e a)
@@ -462,13 +487,13 @@
       (bel-sigerr 'cannot-set s r m)))
 
 (define-global bel-set2 (p e a s r m)
-  (print (str `(set2 :p ,p :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(set2 :p ,p :e ,e :a ,a :s ,s :r ,r :m ,m)))
   (bel-let (cell loc) p
     ((bel-case loc a bel-xar d bel-xdr) cell e)
     (bel-mev s (bel-cons e r) m)))
 
 (bel-form dyn ((v e1 e2) a s r m)
-  (print (str `(dyn :v ,v :e1 ,e1 :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(dyn :v ,v :e1 ,e1 :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
   (if (bel-variable v)
       (bel-mev (bel-cons (list e1 a)
                          (bel-fu (s r m) (bel-dyn2 v e2 a s r m))
@@ -478,7 +503,7 @@
       (bel-sigerr 'cannot-bind s r m)))
 
 (define-global bel-dyn2 (v e2 a s r m)
-  (print (str `(dyn2 :v ,v :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(dyn2 :v ,v :e2 ,e2 :a ,a :s ,s :r ,r :m ,m)))
   (bel-mev (bel-cons (bel-list e2 a)
                      (bel-list (bel-list bel-smark 'bind (bel-cons v (bel-car r)))
                                bel-nil)
@@ -520,8 +545,8 @@
            bel-id))
 
 (define-global bel-evcall (e a s r m)
-  (print (str `(bel-evcall :e ,e :a ,a :s ,s :r ,r :m ,m)))
-  (bel-mev (bel-cons (list (bel-car e) a)
+  ; (print (str `(bel-evcall :e ,e :a ,a :s ,s :r ,r :m ,m)))
+  (bel-mev (bel-cons (bel-list (bel-car e) a)
                      (bel-fu (s r m)
                        (bel-evcall2 (bel-cdr e) a s r m))
                      s)
@@ -529,14 +554,14 @@
            m))
 
 (define-global bel-evcall2 (es a s (op . r) m)
-  (print (str `(bel-evcall2 :es ,es :a ,a :s ,s :op ,op :r ,r :m ,m)))
+  ; (print (str `(bel-evcall2 :es ,es :a ,a :s ,s :op ,op :r ,r :m ,m)))
   (if ((bel-isa 'mac) op)
       (bel-applym op es a s r m)
-      (bel-mev (bel-append (bel-map (fn (_) (list _ a)) es)
+      (bel-mev (bel-append (bel-map (fn (_) (bel-list _ a)) es)
                            (bel-cons (bel-fu (s r m)
-                                       (print (str `(bel-evcall2-fu :es ,es :s ,s :r ,r :m ,m)))
+                                       ; (print (str `(bel-evcall2-fu :es ,es :s ,s :r ,r :m ,m)))
                                        (let ((args r2) (bel-snap es r))
-                                         (print (str `(bel-evcall2-fu2 :args ,args :r2 ,r2 :es ,es :s ,s :r ,r :m ,m)))
+                                         ; (print (str `(bel-evcall2-fu2 :args ,args :r2 ,r2 :es ,es :s ,s :r ,r :m ,m)))
                                          (bel-applyf op (bel-rev args) a s r2 m)))
                                      s))
                r
@@ -555,7 +580,7 @@
               m))
 
 (define-global bel-applyf (f args a s r m)
-  (print (str `(bel-applyf :f ,f :args ,args :a ,a :s ,s :r ,r :m ,m)))
+  ; (print (str `(bel-applyf :f ,f :args ,args :a ,a :s ,s :r ,r :m ,m)))
   (if (= f 'apply)   (bel-applyf (bel-car args) (bel-reduce bel-join (bel-cdr args)) a s r m)
       (bel-caris f 'lit) (if (bel-proper f)
                              (bel-applylit f args a s r m)
@@ -565,6 +590,7 @@
     (bel-sigerr 'cannot-apply s r m)))
 
 (define-global bel-applylit (f args a s r m)
+  ; (print (str `(bel-applylit :f ,f :args ,args :a ,a :s ,s :r ,r :m ,m)))
   (let ((tag . rest) (bel-cdr f))
     (bel-case tag
       prim (bel-applyprim (bel-car rest) args s r m)
@@ -573,7 +599,7 @@
                  (bel-applyclo parms args env body s r m)
                  (bel-sigerr 'bad-clo s r m)))
       mac  (bel-applym f (bel-map (fn (_) (bel-list 'quote _)) args) a s r m)
-      cont (let (((o s2) (o r2) . extra) ret)
+      cont (let (((o s2) (o r2) . extra) rest)
              ; TODO: okstack
              (bel-applycont s2 r2 args s r m))
       (bel-sigerr 'unapplyable s r m))))
@@ -601,7 +627,7 @@
 
 
 (define-global bel-applycont (s2 r2 args s r m)
-  (if (or (bel-no args) (bel-cdr args))
+  (if (or (bel-no args) (bel-yes (bel-cdr args)))
       (bel-sigerr 'wrong-no-args s r m)
       (bel-mev (bel-append (bel-keep (fn (_) (and (bel-protected _) (bel-no (bel-mem _ s2 id))))
                                      s)
@@ -610,7 +636,7 @@
                m)))
 
 (define-global bel-protected (x)
-  (bel-some (fn (_) (bel-begins (bel-car x) (list bel-smark _) id))
+  (bel-some (fn (_) (bel-begins (bel-car x) (list bel-smark _) bel-id))
             '(bind prot)))
 
 (define-global bel-globe
@@ -622,12 +648,168 @@
   (bel-put 'join '(lit prim join)
   (bel-put 'type '(lit prim type)
   (bel-put 'prn '(lit prim prn)
-  )))))))))
+  (bel-put 'sum '(lit prim sum)
+  (bel-put 'cons '(lit prim cons)
+  )))))))))))
 
 (define-global bel-bel (e (o g bel-globe))
   (bel-ev (list (list e bel-nil))
           bel-nil
           (list bel-nil g)))
+
+(during-compilation
+  (define-macro bel args
+    `(do ,@(map (fn (expr) `(bel-bel ',expr)) args)))
+
+  ; (define-macro bel-fn (parms rest: body)
+  ;   (if (none? (tl body))
+  ;       `(list 'lit 'clo nil ,parms ,(bel-car body))
+  ;       `(lit clo nil 
+
+  ; (define-macro def (name parms body)
+  ;   `(bel (set ,name (lit clo nil ,parms ,body))))
+
+  )
+
+(define-global bel-set (name value)
+  (bel-bel `(set ,name ',value)))
+
+(bel (set list (lit clo nil args args)))
+
+;(bel (set a 1))
+
+(bel (set fn (lit mac (lit clo nil (parms body)
+                               (list 'list ''lit ''clo 'scope
+                                     (list 'quote parms)
+                                     (list 'quote body))
+                               ))))
+                               ; (list 'list ''lit ''clo 'scope
+                               ;       (list 'quote parms)
+                               ;       (list 'quote (join 'do body))))))))
+
+; (bel (set def (lit mac (fn (name parms body)
+;                          (list 'set name (list 'fn parms body))))))
+
+(bel (set def (lit mac (lit clo nil (name parms body)
+                            (list 'set name
+                               (list 'list ''lit ''clo 'scope
+                                     (list 'quote parms)
+                                     (list 'quote body))
+                               )))))
+
+; (bel (set mac (lit mac (lit clo nil (name parms body)
+;                             (list 'set name
+;                                (list 'lit 'mac
+;                                  (list 'list ''lit ''clo 'scope
+;                                        (list 'quote parms)
+;                                        (list 'quote body)))
+;                                )))))
+              
+
+; (bel (set no (lit clo nil (x) (id x nil))))
+; (bel (set atom (lit clo nil (x) (no (id (type x) 'pair)))))
+; (bel (set all (lit clo nil (f xs)
+;                    (if (no xs) t
+;                        (f (car xs)) (all f (cdr xs))
+;                       nil))))
+
+
+; (bel (set assign (lit clo nil args args)))
+
+; (bel (set fn (lit mac (lit clo nil (parms expr)
+;                            (list 'lit 'clo 'nil parms expr)))))
+
+; (bel (set def (lit mac (fn (name parms expr)
+;                          (list 'set name 'foo); '(list 'fn parms expr)
+;                                ))))
+
+; (bel (set fn (lit mac (lit clo nil (parms rest: body)
+;                            (join 'lit 
+
+
+
+
+
+
+(def no (x)
+  (id x nil))
+
+(def atom (x)
+  (no (id (type x) 'pair)))
+
+(def all (f xs)
+  (if (no xs)      t
+      (f (car xs)) (all f (cdr xs))
+                   nil))
+
+(def some (f xs)
+  (if (no xs)      nil
+      (f (car xs)) xs
+                   (some f (cdr xs))))
+
+(def reduce (f xs)
+  ;(prn (list f (no (cdr xs))) 'reduce)
+  (if (no (cdr xs))
+      (car xs)
+      (f (car xs) (reduce f (cdr xs)))))
+
+; (def cons args
+;   (reduce join args))
+
+
+
+(def test ()
+  (join 'test (ccc (fn (f) (set foo f)))))
+
+(bel
+
+  (set *paths* ())
+  (set failsym '@)
+
+  (def choose (choices)
+    (if (no choices)
+        (fail)
+        (ccc
+          (fn (cc)
+            ((fn (ignore)
+               (car choices))
+             (set *paths*
+                  (cons (fn ()
+                          (cc (choose (cdr choices))))
+                        *paths*)))))))
+
+  (set fail nil)
+
+  (ccc
+    (fn (cc)
+      (set fail
+           (fn ()
+             (if (no *paths*)
+                 (cc failsym)
+                 ((fn (p1)
+                    ((fn (ignore)
+                       (p1))
+                     (set *paths* (cdr *paths*))))
+                  (car *paths*)))))))
+
+  (def two-numbers ()
+    (list (choose '(0 1 2 3 4 5))
+          (choose '(1 2 3 4 5))))
+
+  (def parlor-trick (total)
+   (prn
+    ((fn (nums)
+       (if (id (prn (sum nums) 'total) total)
+           (list 'result nums)
+           (fail)))
+     (two-numbers))
+    'parlor-trick))
+
+
+
+
+)
+
 
 ; (bel-lookup 'scope (bel-put 'foo 42) '((+ 1 2)) (bel-put 'car 'bel-car))
 ; (bel-lookup 'globe (bel-put 'foo 42) '((+ 1 2)) (bel-put 'car 'bel-car))
